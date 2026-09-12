@@ -202,18 +202,57 @@ describe('项目进度与风险看板', () => {
     expect(r.risks.find((x) => x.code === 'unresolved-comments')?.level).toBe('high');
   });
 
+  it('回归：对照图不能跳过前置流程（阶段必须连续推进）', () => {
+    const base: DashboardInput = {
+      project,
+      folios: [makeFolio('f9', 1, true)], // 有修复后对照图
+      layers: makeLayers('f9'),
+      shapes: [],
+      steps: [],
+      comments: [],
+      versions: [],
+      now: NOW
+    };
+    // 只有对照图、无标注/方案/工序 → 仍为“已导入”，漏斗与总进度不被抬高
+    const only = buildDashboard(base);
+    expect(only.folios[0].stage).toBe('imported');
+    expect(only.completion).toBe(0);
+    expect(only.stageReached).toEqual({ imported: 1, annotated: 0, planned: 0, treated: 0, compared: 0 });
+
+    // 有标注 + 对照图，但无方案/工序 → 止步“已标注”
+    const partial = buildDashboard({ ...base, shapes: [makeShape('sx1', 'f9', 'damage', 'tear')] });
+    expect(partial.folios[0].stage).toBe('annotated');
+    expect(partial.stageReached).toEqual({ imported: 1, annotated: 1, planned: 0, treated: 0, compared: 0 });
+
+    // 有标注 + 方案 + 对照图，但无工序 → 止步“已立项”
+    const noSteps = buildDashboard({
+      ...base,
+      shapes: [makeShape('sx1', 'f9', 'damage', 'tear'), makeShape('sx2', 'f9', 'repair', 'tear')]
+    });
+    expect(noSteps.folios[0].stage).toBe('planned');
+
+    // 补全工序后 → 才到达“已对比”
+    const full = buildDashboard({
+      ...base,
+      shapes: [makeShape('sx1', 'f9', 'damage', 'tear'), makeShape('sx2', 'f9', 'repair', 'tear')],
+      steps: [makeStep('st9', 'f9')]
+    });
+    expect(full.folios[0].stage).toBe('compared');
+    expect(full.completion).toBe(100);
+  });
+
   it('风险：项目超过 30 天未更新且未完工 → 提示停滞', () => {
     const input = fixture();
     input.project = { ...project, updated_at: '2026-07-01T08:00:00.000Z' };
     const r = buildDashboard(input);
     expect(r.risks.find((x) => x.code === 'stale-project')?.level).toBe('low');
-    // 全部完工（completion 100）则不提示
+    // 全部完工（走完完整流水线，completion 100）则不提示
     const done = buildDashboard({
       ...input,
       folios: [makeFolio('f9', 1, true)],
       layers: makeLayers('f9'),
-      shapes: [],
-      steps: [],
+      shapes: [makeShape('sx1', 'f9', 'damage', 'tear'), makeShape('sx2', 'f9', 'repair', 'tear')],
+      steps: [makeStep('st9', 'f9')],
       comments: [],
       versions: []
     });

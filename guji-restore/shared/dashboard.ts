@@ -13,7 +13,8 @@ import { DAMAGE_META } from './constants.js';
 
 /**
  * 项目进度与风险看板：纯函数推导，不新增任何存储。
- * 进度 = 每叶沿「导入 → 标注 → 立项 → 施作 → 对比」流水线到达的最远阶段；
+ * 进度 = 每叶沿「导入 → 标注 → 立项 → 施作 → 对比」流水线**连续**到达的最远阶段
+ * （后续阶段不得跳过前置流程：例如仅有修复后对照图的叶仍记为“已导入”）；
  * 风险 = 一组可解释规则（未立方案、批注未闭环、高风险工艺……），逐条给出理由。
  * 主进程（SQLite 聚合）与浏览器 Mock 共用本模块，保证两端口径一致。
  */
@@ -125,11 +126,19 @@ export function buildDashboard(input: DashboardInput): DashboardReport {
       const repair = shapesOf(f.id, 'repair');
       const steps = stepsOf(f.id);
       const hasAfter = !!f.after_rel;
+      // 阶段必须沿流水线连续推进，不得跳过前置流程：
+      // 只有修复后对照图、没有标注/方案/工序的叶，不能记为“已对比”
       let stage: FolioStage = 'imported';
-      if (damage.length > 0) stage = 'annotated';
-      if (repair.length > 0) stage = 'planned';
-      if (steps.length > 0) stage = 'treated';
-      if (hasAfter) stage = 'compared';
+      const gates: [FolioStage, boolean][] = [
+        ['annotated', damage.length > 0],
+        ['planned', repair.length > 0],
+        ['treated', steps.length > 0],
+        ['compared', hasAfter]
+      ];
+      for (const [s, ok] of gates) {
+        if (!ok) break;
+        stage = s;
+      }
       return {
         folio_id: f.id,
         name: f.name,
