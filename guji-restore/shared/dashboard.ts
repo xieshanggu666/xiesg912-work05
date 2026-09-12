@@ -291,15 +291,26 @@ export function buildDashboard(input: DashboardInput): DashboardReport {
     });
   }
 
-  const updatedAt = Date.parse(input.project.updated_at);
-  if (Number.isFinite(updatedAt)) {
-    const days = Math.floor((now.getTime() - updatedAt) / 86_400_000);
+  // 停滞判定以项目内可观测的最新活动为准：除 project.updated_at 外，
+  // 批注/工序/标注/版本/扫描的创建时间也算活动（旧数据的这些操作可能从未写过 updated_at）
+  const lastActivity = [
+    input.project.updated_at,
+    ...input.folios.map((f) => f.imported_at),
+    ...input.shapes.map((s) => s.created_at),
+    ...input.steps.map((s) => s.created_at),
+    ...input.versions.map((v) => v.created_at),
+    ...input.comments.map((c) => c.created_at)
+  ]
+    .map((t) => Date.parse(t))
+    .reduce((a, b) => Math.max(a, b), 0);
+  if (lastActivity > 0) {
+    const days = Math.floor((now.getTime() - lastActivity) / 86_400_000);
     if (days > STALE_DAYS && completion < 100) {
       risks.push({
         level: 'low',
         code: 'stale-project',
         title: '项目久未更新',
-        detail: `项目已 ${days} 天未更新，进度停留在 ${completion}%；若暂停修复请在档案中注明原因。`,
+        detail: `项目已 ${days} 天无新动态（批注/工序/标注/扫描），进度停留在 ${completion}%；若暂停修复请在档案中注明原因。`,
         folio_id: null
       });
     }

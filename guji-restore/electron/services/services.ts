@@ -165,7 +165,9 @@ export async function importFolios(
 
 export function updateFolio(ctx: ServiceContext, id: ID, patch: Partial<Pick<Folio, 'name' | 'note'>>): Folio {
   const folio = mustFolio(ctx, id);
-  return repo.updateFolioRow(ctx.projectDb(folio.project_id), id, patch);
+  const next = repo.updateFolioRow(ctx.projectDb(folio.project_id), id, patch);
+  touchProject(ctx, folio.project_id);
+  return next;
 }
 
 export function removeFolio(ctx: ServiceContext, id: ID): void {
@@ -259,17 +261,21 @@ export function createLayer(
     created_at: nowIso()
   };
   repo.insertLayer(db, layer);
+  touchProject(ctx, folio.project_id);
   return layer;
 }
 
 export function updateLayer(ctx: ServiceContext, id: ID, patch: Partial<Layer>): Layer {
-  const layer = mustLayer(ctx, id, 'layers');
-  return repo.updateLayerRow(ctx.projectDb(layer.folio_id), id, patch);
+  const layer = mustLayer(ctx, id);
+  const next = repo.updateLayerRow(ctx.projectDb(layer.project_id), id, patch);
+  touchProject(ctx, layer.project_id);
+  return next;
 }
 
 export function removeLayer(ctx: ServiceContext, id: ID): void {
-  const layer = mustLayer(ctx, id, 'layers');
-  repo.deleteLayerRow(ctx.projectDb(layer.folio_id), id);
+  const layer = mustLayer(ctx, id);
+  repo.deleteLayerRow(ctx.projectDb(layer.project_id), id);
+  touchProject(ctx, layer.project_id);
 }
 
 /* ---------------- 标注 ---------------- */
@@ -305,19 +311,21 @@ export function createShape(
 }
 
 export function updateShape(ctx: ServiceContext, id: ID, patch: Partial<Shape>): Shape {
-  const shape = mustShape(ctx, id, 'shapes');
+  const shape = mustShape(ctx, id);
   const next = { ...patch };
   if (patch.geometry) {
     next.geometry = normalizeGeometry(patch.geometry);
     next.area_px = geometryArea(next.geometry);
   }
-  return repo.updateShapeRow(ctx.projectDb(shape.folio_id), id, next);
+  const updated = repo.updateShapeRow(ctx.projectDb(shape.project_id), id, next);
+  touchProject(ctx, shape.project_id);
+  return updated;
 }
 
 export function removeShape(ctx: ServiceContext, id: ID): void {
-  const shape = mustShape(ctx, id, 'shapes');
-  repo.deleteShapeRow(ctx.projectDb(shape.folio_id), id);
-  touchProject(ctx, shape.folio_id);
+  const shape = mustShape(ctx, id);
+  repo.deleteShapeRow(ctx.projectDb(shape.project_id), id);
+  touchProject(ctx, shape.project_id);
 }
 
 /** 规范化几何：丢弃负值宽高、去除重复末点 */
@@ -426,7 +434,11 @@ export function updateStep(ctx: ServiceContext, id: ID, patch: Partial<Restorati
   for (const p of repo.listProjects(lib)) {
     const db = ctx.projectDb(p.id);
     const hit = db.prepare('SELECT project_id FROM steps WHERE id = ?').get(id) as any;
-    if (hit) return repo.updateStepRow(db, id, patch);
+    if (hit) {
+      const updated = repo.updateStepRow(db, id, patch);
+      touchProject(ctx, p.id);
+      return updated;
+    }
   }
   throw new Error(`工序不存在: ${id}`);
 }
@@ -471,6 +483,7 @@ export function saveVersion(
     created_at: nowIso()
   };
   repo.insertVersion(db, version);
+  touchProject(ctx, folio.project_id);
   return version;
 }
 
@@ -497,6 +510,7 @@ export function restoreVersion(ctx: ServiceContext, versionId: ID, author: strin
   };
   repo.insertVersion(db, current);
   repo.replacePlan(db, target.folio_id, target.snapshot);
+  touchProject(ctx, target.project_id);
   return target;
 }
 
@@ -538,20 +552,25 @@ export function createComment(
     created_at: nowIso()
   };
   repo.insertComment(ctx.projectDb(input.project_id), comment);
+  touchProject(ctx, input.project_id);
   return comment;
 }
 
 export function resolveComment(ctx: ServiceContext, id: ID, resolved: boolean): Comment {
-  const folio = commentFolio(ctx, id);
-  return repo.resolveCommentRow(ctx.projectDb(folio), id, resolved);
+  const projectId = commentProjectId(ctx, id);
+  const next = repo.resolveCommentRow(ctx.projectDb(projectId), id, resolved);
+  touchProject(ctx, projectId);
+  return next;
 }
 
 export function removeComment(ctx: ServiceContext, id: ID): void {
-  const folio = commentFolio(ctx, id);
-  repo.deleteCommentRow(ctx.projectDb(folio), id);
+  const projectId = commentProjectId(ctx, id);
+  repo.deleteCommentRow(ctx.projectDb(projectId), id);
+  touchProject(ctx, projectId);
 }
 
-function commentFolio(ctx: ServiceContext, id: ID): ID {
+/** 批注所属项目（批注按项目分库存储） */
+function commentProjectId(ctx: ServiceContext, id: ID): ID {
   for (const p of repo.listProjects(ctx.library())) {
     const hit = ctx.projectDb(p.id).prepare('SELECT 1 FROM comments WHERE id = ?').get(id);
     if (hit) return p.id;
@@ -573,19 +592,19 @@ function mustFolio(ctx: ServiceContext, id: ID): Folio {
   throw new Error(`扫描叶不存在: ${id}`);
 }
 
-/** 通用的“按 ID 反查所属叶”（用于图层/标注） */
-function mustLayer(ctx: ServiceContext, id: ID, _kind: 'layers'): { folio_id: ID } {
+/** 按 ID 反查图层所属叶与项目（图层/标注只存 folio_id，而项目库按项目分文件） */
+function mustLayer(ctx: ServiceContext, id: ID): { folio_id: ID; project_id: ID } {
   for (const p of repo.listProjects(ctx.library())) {
     const row = ctx.projectDb(p.id).prepare('SELECT folio_id FROM layers WHERE id = ?').get(id) as any;
-    if (row) return { folio_id: row.folio_id };
+    if (row) return { folio_id: row.folio_id, project_id: p.id };
   }
   throw new Error(`图层不存在: ${id}`);
 }
 
-function mustShape(ctx: ServiceContext, id: ID, _kind: 'shapes'): { folio_id: ID } {
+function mustShape(ctx: ServiceContext, id: ID): { folio_id: ID; project_id: ID } {
   for (const p of repo.listProjects(ctx.library())) {
     const row = ctx.projectDb(p.id).prepare('SELECT folio_id FROM shapes WHERE id = ?').get(id) as any;
-    if (row) return { folio_id: row.folio_id };
+    if (row) return { folio_id: row.folio_id, project_id: p.id };
   }
   throw new Error(`标注不存在: ${id}`);
 }

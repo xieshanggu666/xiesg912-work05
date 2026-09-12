@@ -52,6 +52,14 @@ function createMockApi(): GujiApi {
     return v;
   };
 
+  // 与 Electron 端 touchProject 一致：任何项目级写操作都推进项目 updated_at（看板停滞判定依赖它）
+  const touchProject = (pid: string | undefined) => {
+    const p = db.projects.find((x: Row) => x.id === pid);
+    if (p) p.updated_at = now();
+  };
+  const projectOfFolio = (fid: string): string | undefined =>
+    db.folios.find((f: Row) => f.id === fid)?.project_id;
+
   const defaultLayers = (folioId: string) => [
     { id: uid('lay_'), folio_id: folioId, name: '破损标注', kind: 'damage', color: '#d9480f', visible: true, locked: false, opacity: 0.5, order_index: 0, created_at: now() },
     { id: uid('lay_'), folio_id: folioId, name: '修补方案', kind: 'repair', color: '#2b8a3e', visible: true, locked: false, opacity: 0.5, order_index: 1, created_at: now() },
@@ -254,11 +262,20 @@ function createMockApi(): GujiApi {
             return f;
           })
         ),
-      update: async (id, patch) => asyncify(Object.assign(db.folios.find((f: Row) => f.id === id)!, patch)),
+      update: async (id, patch) =>
+        asyncify(
+          (() => {
+            const f = Object.assign(db.folios.find((f: Row) => f.id === id)!, patch);
+            touchProject(f.project_id);
+            return f;
+          })()
+        ),
       remove: async (id) => {
+        const f = db.folios.find((x: Row) => x.id === id);
         db.folios = db.folios.filter((f: Row) => f.id !== id);
         db.layers = db.layers.filter((l: Row) => l.folio_id !== id);
         db.shapes = db.shapes.filter((s: Row) => s.folio_id !== id);
+        touchProject(f?.project_id);
         return asyncify(undefined as any);
       },
       setAfterImage: async (id, srcPath) =>
@@ -268,6 +285,7 @@ function createMockApi(): GujiApi {
           // data URL 形式的上传内容登记进媒体表，否则 mediaUrl 只能映射到不存在的样例文件
           const rel = `after/${id}${extOf(srcPath)}`;
           if (srcPath.startsWith('data:')) db.media[rel] = srcPath;
+          touchProject(f.project_id);
           return Object.assign(f, { after_rel: rel, after_checksum: uid('sha-') });
         })()),
       averageColor: async () => asyncify({ hex: '#e6d8b0' })
@@ -283,11 +301,19 @@ function createMockApi(): GujiApi {
             order_index: db.layers.filter((l: Row) => l.folio_id === fid).length, created_at: now()
           };
           db.layers.push(l);
+          touchProject(projectOfFolio(fid));
           return l;
         })()),
-      update: async (id, patch) => asyncify(Object.assign(db.layers.find((l: Row) => l.id === id)!, patch)),
+      update: async (id, patch) =>
+        asyncify((() => {
+          const l = Object.assign(db.layers.find((l: Row) => l.id === id)!, patch);
+          touchProject(projectOfFolio(l.folio_id));
+          return l;
+        })()),
       remove: async (id) => {
+        const l = db.layers.find((x: Row) => x.id === id);
         db.layers = db.layers.filter((l: Row) => l.id !== id);
+        touchProject(l ? projectOfFolio(l.folio_id) : undefined);
         return asyncify(undefined as any);
       }
     },
@@ -303,6 +329,7 @@ function createMockApi(): GujiApi {
             order_index: db.shapes.filter((s: Row) => s.folio_id === fid).length + 1, created_at: now()
           };
           db.shapes.push(s);
+          touchProject(projectOfFolio(fid));
           return s;
         })()),
       update: async (id, patch) =>
@@ -310,10 +337,13 @@ function createMockApi(): GujiApi {
           const s = db.shapes.find((x: Row) => x.id === id)!;
           Object.assign(s, patch);
           if (patch.geometry) s.area_px = area(patch.geometry);
+          touchProject(projectOfFolio(s.folio_id));
           return s;
         })()),
       remove: async (id) => {
+        const s = db.shapes.find((x: Row) => x.id === id);
         db.shapes = db.shapes.filter((s: Row) => s.id !== id);
+        touchProject(s ? projectOfFolio(s.folio_id) : undefined);
         return asyncify(undefined as any);
       }
     },
@@ -369,11 +399,19 @@ function createMockApi(): GujiApi {
         asyncify((() => {
           const s = { ...input, id: uid('stp_'), created_at: now() };
           db.steps.push(s);
+          touchProject(input.project_id);
           return s;
         })()),
-      update: async (id, patch) => asyncify(Object.assign(db.steps.find((s: Row) => s.id === id)!, patch)),
+      update: async (id, patch) =>
+        asyncify((() => {
+          const s = Object.assign(db.steps.find((s: Row) => s.id === id)!, patch);
+          touchProject(s.project_id);
+          return s;
+        })()),
       remove: async (id) => {
+        const s = db.steps.find((x: Row) => x.id === id);
         db.steps = db.steps.filter((s: Row) => s.id !== id);
+        touchProject(s?.project_id);
         return asyncify(undefined as any);
       }
     },
@@ -396,6 +434,7 @@ function createMockApi(): GujiApi {
             created_at: now()
           };
           db.versions.push(v);
+          touchProject(folio.project_id);
           return v;
         })()),
       restore: async (vid, author) =>
@@ -419,6 +458,7 @@ function createMockApi(): GujiApi {
           db.shapes = db.shapes.filter((s: Row) => s.folio_id !== target.folio_id);
           db.layers.push(...target.snapshot.layers);
           db.shapes.push(...target.snapshot.shapes);
+          touchProject(folio.project_id);
           return target;
         })()),
       snapshot: async (fid) =>
@@ -438,12 +478,19 @@ function createMockApi(): GujiApi {
             author: input.author, body: input.body, resolved: false, created_at: now()
           };
           db.comments.push(c);
+          touchProject(input.project_id);
           return c;
         })()),
       resolve: async (id, resolved) =>
-        asyncify(Object.assign(db.comments.find((c: Row) => c.id === id)!, { resolved })),
+        asyncify((() => {
+          const c = Object.assign(db.comments.find((c: Row) => c.id === id)!, { resolved });
+          touchProject(c.project_id);
+          return c;
+        })()),
       remove: async (id) => {
+        const c = db.comments.find((x: Row) => x.id === id);
         db.comments = db.comments.filter((c: Row) => c.id !== id);
+        touchProject(c?.project_id);
         return asyncify(undefined as any);
       }
     },

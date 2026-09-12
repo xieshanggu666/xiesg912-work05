@@ -241,20 +241,46 @@ describe('项目进度与风险看板', () => {
     expect(full.completion).toBe(100);
   });
 
-  it('风险：项目超过 30 天未更新且未完工 → 提示停滞', () => {
-    const input = fixture();
-    input.project = { ...project, updated_at: '2026-07-01T08:00:00.000Z' };
-    const r = buildDashboard(input);
+  it('风险：停滞以项目内最新活动为准（批注/工序/标注都算活动）', () => {
+    const old = '2026-07-01T08:00:00.000Z';
+    const staleInput: DashboardInput = {
+      project: { ...project, updated_at: old },
+      folios: [{ ...makeFolio('f1', 1), imported_at: old }],
+      layers: makeLayers('f1'),
+      shapes: [{ ...makeShape('s1', 'f1', 'damage', 'tear'), created_at: old }],
+      steps: [],
+      comments: [],
+      versions: [],
+      now: NOW
+    };
+    // 全部活动都超过 30 天 → 报停滞
+    const r = buildDashboard(staleInput);
     expect(r.risks.find((x) => x.code === 'stale-project')?.level).toBe('low');
+
+    // 项目元数据虽旧，但昨天刚加了批注 → 不误报（回归：批注要计入活动时间）
+    const withComment = buildDashboard({
+      ...staleInput,
+      comments: [{ ...makeComment('c1', false), created_at: '2026-09-11T08:00:00.000Z' }]
+    });
+    expect(withComment.risks.some((x) => x.code === 'stale-project')).toBe(false);
+
+    // 昨天刚记了工序 → 同样不误报
+    const withStep = buildDashboard({
+      ...staleInput,
+      steps: [{ ...makeStep('st1', 'f1'), created_at: '2026-09-11T08:00:00.000Z' }]
+    });
+    expect(withStep.risks.some((x) => x.code === 'stale-project')).toBe(false);
+
     // 全部完工（走完完整流水线，completion 100）则不提示
     const done = buildDashboard({
-      ...input,
-      folios: [makeFolio('f9', 1, true)],
+      ...staleInput,
+      folios: [{ ...makeFolio('f9', 1, true), imported_at: old }],
       layers: makeLayers('f9'),
-      shapes: [makeShape('sx1', 'f9', 'damage', 'tear'), makeShape('sx2', 'f9', 'repair', 'tear')],
-      steps: [makeStep('st9', 'f9')],
-      comments: [],
-      versions: []
+      shapes: [
+        { ...makeShape('sx1', 'f9', 'damage', 'tear'), created_at: old },
+        { ...makeShape('sx2', 'f9', 'repair', 'tear'), created_at: old }
+      ],
+      steps: [{ ...makeStep('st9', 'f9'), created_at: old }]
     });
     expect(done.completion).toBe(100);
     expect(done.risks.some((x) => x.code === 'stale-project')).toBe(false);

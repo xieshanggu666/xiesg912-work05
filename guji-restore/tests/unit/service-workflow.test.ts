@@ -191,6 +191,36 @@ describe('主进程工作流（SQLite + sharp + zip）', () => {
     expect(stats.comments).toBe(1);
     expect(stats.shapes).toBe(2);
 
+    // 10) 项目活动时间：批注 / 编辑工序 / 删除标注都会推进 project.updated_at
+    // （看板“项目久未更新”风险依赖该时间，漏报曾导致误报停滞）
+    const libDb = ctx.library();
+    const OLD = '2020-01-01T00:00:00.000Z';
+    const freeze = () =>
+      libDb.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(OLD, project.id);
+    const updatedAt = () =>
+      (libDb.prepare('SELECT updated_at AS u FROM projects WHERE id = ?').get(project.id) as any).u as string;
+
+    freeze();
+    s.createComment(ctx, {
+      project_id: project.id,
+      folio_id: null,
+      target_type: 'project',
+      author: '复核员',
+      body: '新增一条批注'
+    });
+    expect(updatedAt() > OLD).toBe(true);
+
+    freeze();
+    const [stp] = s.listSteps(ctx, project.id);
+    s.updateStep(ctx, stp.id, { note: '补充：边缘先加固' });
+    expect(updatedAt() > OLD).toBe(true);
+
+    // 删除标注：真正从所属项目库删除（回归：曾误用 folio_id 打开空库并抛错），且推进更新时间
+    freeze();
+    s.removeShape(ctx, shp.id);
+    expect(s.listShapes(ctx, folio.id).some((x) => x.id === shp.id)).toBe(false);
+    expect(updatedAt() > OLD).toBe(true);
+
     unlinkSync(zipPath);
   }, 30_000);
 });
