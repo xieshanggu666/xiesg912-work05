@@ -1,3 +1,4 @@
+import type { DashboardReport } from './dashboard.js';
 import type {
   Comment,
   CommentTarget,
@@ -133,6 +134,11 @@ export interface GujiApi {
   archive: {
     /** 生成离线 HTML 档案 + 原图/对照图/校验清单 zip */
     exportProject(projectId: ID, opts: { includeOriginal: boolean }): Promise<ExportResult>;
+  };
+
+  dashboard: {
+    /** 项目进度与风险看板：由叶/标注/工序/批注/版本实时推导，不落库 */
+    get(projectId: ID): Promise<DashboardReport>;
   };
 
   dialog: {

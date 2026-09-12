@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('guji', {
   versions: ns('versions'),
   comments: ns('comments'),
   archive: ns('archive'),
+  dashboard: ns('dashboard'),
   dialog: ns('dialog'),
   mediaUrl(projectId, rel) {
     const enc = rel

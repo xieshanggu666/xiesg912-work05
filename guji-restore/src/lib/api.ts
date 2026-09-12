@@ -4,6 +4,7 @@
  *  - 浏览器 / Playwright：使用同构内存 Mock（localStorage 持久化），并把图片指向 /samples
  */
 import type { GujiApi } from '@shared/protocol';
+import { buildDashboard } from '@shared/dashboard';
 
 export const api: GujiApi =
   typeof window !== 'undefined' && window.guji
@@ -450,6 +451,27 @@ function createMockApi(): GujiApi {
     archive: {
       exportProject: async () =>
         asyncify({ zip_path: '(浏览器 Mock 模式不产生真实 zip；Electron 内导出)', bytes: 0, folio_count: 0, checksum_manifest: true })
+    },
+
+    dashboard: {
+      // 与 Electron 端 projectDashboard 同构：聚合内存库后走同一个共享纯函数
+      get: async (pid) =>
+        asyncify(
+          (() => {
+            const project = db.projects.find((p: Row) => p.id === pid);
+            if (!project) throw new Error(`项目不存在: ${pid}`);
+            const folioIds = new Set(db.folios.filter((f: Row) => f.project_id === pid).map((f: Row) => f.id));
+            return buildDashboard({
+              project,
+              folios: db.folios.filter((f: Row) => f.project_id === pid),
+              layers: db.layers.filter((l: Row) => folioIds.has(l.folio_id)),
+              shapes: db.shapes.filter((s: Row) => folioIds.has(s.folio_id)),
+              steps: db.steps.filter((s: Row) => s.project_id === pid),
+              comments: db.comments.filter((c: Row) => c.project_id === pid),
+              versions: db.versions.filter((v: Row) => folioIds.has(v.folio_id))
+            });
+          })()
+        )
     },
 
     dialog: {

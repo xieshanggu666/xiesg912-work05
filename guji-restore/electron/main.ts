@@ -164,6 +164,8 @@ function registerIpc(): void {
       });
     },
 
+    'dashboard.get': (projectId) => svc.projectDashboard(ctx, projectId),
+
     'dialog.pickImages': async () => {
       const r = dialog.showOpenDialogSync(mainWindow!, {
         title: '选择古籍高清扫描图',

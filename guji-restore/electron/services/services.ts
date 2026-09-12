@@ -24,6 +24,7 @@ import { newId, nowIso } from '@shared/id';
 import { geometryArea } from '@shared/geometry';
 import { hexToLab } from '@shared/color';
 import { recommendMaterials } from '@shared/recommend';
+import { buildDashboard, type DashboardReport } from '@shared/dashboard';
 import { INITIAL_PLAN_VERSION, LAYER_KIND_META } from '@shared/constants';
 import { openLibrary, openProject } from '../db/schema';
 import * as repo from '../db/repo';
@@ -101,6 +102,24 @@ export function projectStats(ctx: ServiceContext, id: ID) {
     steps: steps.n as number,
     comments: comments.n as number
   };
+}
+
+/* ---------------- 进度与风险看板 ---------------- */
+
+/** 聚合项目库全部数据，交给共享纯函数推导看板（不入库） */
+export function projectDashboard(ctx: ServiceContext, projectId: ID): DashboardReport {
+  const project = repo.getProject(ctx.library(), projectId);
+  if (!project) throw new Error(`项目不存在: ${projectId}`);
+  const db = ctx.projectDb(projectId);
+  return buildDashboard({
+    project,
+    folios: repo.listFolios(db),
+    layers: (db.prepare('SELECT * FROM layers').all() as any[]).map(repo.layerRow),
+    shapes: (db.prepare('SELECT * FROM shapes').all() as any[]).map(repo.shapeRow),
+    steps: repo.listSteps(db, projectId),
+    comments: repo.listComments(db, projectId),
+    versions: (db.prepare('SELECT * FROM plan_versions').all() as any[]).map(repo.versionRow)
+  });
 }
 
 /* ---------------- 叶（扫描） ---------------- */

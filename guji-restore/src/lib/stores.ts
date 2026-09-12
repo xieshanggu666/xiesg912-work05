@@ -11,7 +11,7 @@ import type {
   Shape
 } from '@shared/types';
 
-export type ViewKey = 'annotate' | 'samples' | 'materials' | 'steps' | 'compare' | 'archive';
+export type ViewKey = 'annotate' | 'samples' | 'materials' | 'steps' | 'compare' | 'archive' | 'dashboard';
 
 export const currentView = writable<ViewKey>('annotate');
 export const operator = writable<string>(localStorage.getItem('guji-operator') || '修复师');

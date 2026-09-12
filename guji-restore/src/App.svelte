@@ -27,6 +27,7 @@
   import StepsView from './views/StepsView.svelte';
   import CompareView from './views/CompareView.svelte';
   import ArchiveView from './views/ArchiveView.svelte';
+  import DashboardView from './views/DashboardView.svelte';
   import CommentsPanel from './components/CommentsPanel.svelte';
   import { recommendSampleId } from './lib/stores';
 
@@ -37,6 +38,7 @@
   operator.subscribe((v) => (currentOperator = v));
 
   const TABS: { key: ViewKey; label: string }[] = [
+    { key: 'dashboard', label: '进度看板' },
     { key: 'annotate', label: '扫描标注' },
     { key: 'samples', label: '纸墨样本' },
     { key: 'materials', label: '材料推荐' },
@@ -173,6 +175,8 @@
         <StepsView />
       {:else if $currentView === 'compare'}
         <CompareView />
+      {:else if $currentView === 'dashboard'}
+        <DashboardView />
       {:else}
         <ArchiveView />
       {/if}
